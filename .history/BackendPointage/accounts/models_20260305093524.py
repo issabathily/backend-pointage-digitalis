@@ -85,7 +85,7 @@ class QRDynamic(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.expires_at:
-            self.expires_at = timezone.now() + timedelta(seconds=30)
+            self.expires_at = timezone.now() + timedelta(=5)
         super().save(*args, **kwargs)
 
     def __str__(self):
