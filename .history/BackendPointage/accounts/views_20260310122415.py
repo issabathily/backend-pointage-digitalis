@@ -25,10 +25,9 @@ class LoginView(APIView):
             return Response({
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
-                'role': user.role,
+                'role': UserSerializer(user).role,
                 'user_id': user.id,
-                'nom': user.nom,
-                'prenom': user.prenom,
+                ''
 
             })
         return Response({'error': 'Email ou mot de passe invalide'}, status=status.HTTP_401_UNAUTHORIZED)

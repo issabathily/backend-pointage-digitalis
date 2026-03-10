@@ -25,7 +25,7 @@ class LoginView(APIView):
             return Response({
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
-                'role': user.role,
+                'role': UserSerializer(user).role,
                 'user_id': user.id,
                 'nom': user.nom,
                 'prenom': user.prenom,
