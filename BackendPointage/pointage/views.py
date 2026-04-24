@@ -1,46 +1,74 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 from .models import Pointage, Absence, Horaire
 from .serializers import PointageSerializer, AbsenceSerializer, HoraireSerializer
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
+from .permissions import IsManagerOrAdmin
+from django.contrib.auth import get_user_model
+from datetime import timedelta
+
+User = get_user_model()
 
 class PointageViewSet(viewsets.ModelViewSet):
     queryset = Pointage.objects.all()
     serializer_class = PointageSerializer
     permission_classes = [IsAuthenticated]
-"""
-class AbsenceViewSet(viewsets.ModelViewSet):
-    queryset = Absence.objects.all()
-    serializer_class = AbsenceSerializer
-    #permission_classes = [IsAuthenticated]
-"""
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from .models import Absence
-from .serializers import AbsenceSerializer
-from .permissions import IsManagerOrAdmin
+
+
+def working_days(start_date, end_date):
+    """Calcule les jours ouvrables entre deux dates (hors dimanches)."""
+    count = 0
+    current = start_date
+    while current <= end_date:
+        if current.weekday() != 6:
+            count += 1
+        current += timedelta(days=1)
+    return count
+
 
 class AbsenceViewSet(viewsets.ModelViewSet):
-
     queryset = Absence.objects.all()
     serializer_class = AbsenceSerializer
     permission_classes = [IsAuthenticated]
 
-    # 👇 Valider une absence
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == "ADMIN":
+            return Absence.objects.all()
+        elif user.role == "MANAGER":
+            return Absence.objects.filter(user__role="EMPLOYE") | Absence.objects.filter(user=user)
+        return Absence.objects.filter(user=user)
+
     @action(detail=True, methods=['put'], permission_classes=[IsManagerOrAdmin])
     def valider(self, request, pk=None):
         absence = self.get_object()
-        absence.statut = 'VALIDE'
+
+        if absence.statut != 'EN_ATTENTE':
+            return Response({'error': 'Cette absence a déjà été traitée.'}, status=400)
+
+        # Vérifier le solde si c'est un congé
+        if absence.typeAbsence == 'CONGE':
+            days = working_days(absence.dateDebut, absence.dateFin)
+            user = absence.user
+            if user.conge_restant < days:
+                return Response({
+                    'error': f'Solde insuffisant. {days} jours demandés, {user.conge_restant} restants.'
+                }, status=400)
+            user.conge_restant -= days
+            user.save()
+
+        absence.statut = 'VALIDEE'
         absence.save()
         return Response({'message': 'Absence validée'})
 
-    # 👇 Rejeter une absence
     @action(detail=True, methods=['put'], permission_classes=[IsManagerOrAdmin])
     def rejeter(self, request, pk=None):
         absence = self.get_object()
-        absence.statut = 'REJETE'
+        absence.statut = 'REFUSEE'
         absence.save()
         return Response({'message': 'Absence rejetée'})
     

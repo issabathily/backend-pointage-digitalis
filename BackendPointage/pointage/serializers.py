@@ -19,7 +19,7 @@ class AbsenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Absence
         fields = '__all__'
-        read_only_fields = ['statut']
+        read_only_fields = ['statut', 'user']
         
 class HoraireSerializer(serializers.ModelSerializer):
     class Meta:

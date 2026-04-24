@@ -3,16 +3,31 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model, authenticate
 from .serializers import UserSerializer
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated, BasePermission, SAFE_METHODS
 from rest_framework_simplejwt.tokens import RefreshToken
 
 User = get_user_model()
+
+
+class IsAdminOrManagerReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.is_staff or getattr(user, "role", None) == "ADMIN":
+            return True
+
+        if request.method in SAFE_METHODS and getattr(user, "role", None) == "MANAGER":
+            return True
+
+        return False
 
 # CRUD utilisateurs
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAdminUser]  # seul admin peut gérer les users
+    permission_classes = [IsAdminOrManagerReadOnly]
 
 # Login JWT
 class LoginView(APIView):
