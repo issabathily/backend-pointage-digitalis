@@ -6,7 +6,9 @@ from .models import Pointage, Absence, Horaire
 from .serializers import PointageSerializer, AbsenceSerializer, HoraireSerializer
 from .permissions import IsManagerOrAdmin
 from django.contrib.auth import get_user_model
-from datetime import timedelta
+from datetime import timedelta, datetime
+from django.utils import timezone
+from django.db import models
 
 User = get_user_model()
 
@@ -201,7 +203,204 @@ class QRCodeViewSet(viewsets.ViewSet):
         session.save()
 
         return Response({"message": "Pointage enregistré avec succès"})
-    
+
+
+class KPIViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def employee(self, request):
+        """KPI pour l'employé connecté"""
+        user = request.user
+        today = timezone.now().date()
+        current_month = today.replace(day=1)
+
+        # Pointages du mois pour l'employé
+        monthly_pointages = Pointage.objects.filter(
+            employe=user,
+            date__gte=current_month,
+            date__lte=today
+        )
+
+        # Jours travaillés ce mois (dates uniques)
+        unique_dates = monthly_pointages.values_list('date', flat=True).distinct()
+        days_worked = len(unique_dates)
+
+        # Retards ce mois
+        monthly_lates = monthly_pointages.filter(est_retard=True).count()
+
+        # Heures sup ce mois (convertir minutes en heures)
+        total_overtime_minutes = monthly_pointages.aggregate(
+            total=models.Sum('heures_sup')
+        )['total'] or 0
+        monthly_overtime = round(total_overtime_minutes / 60, 2)
+
+        return Response({
+            "days_worked_this_month": days_worked,
+            "monthly_lates": monthly_lates,
+            "monthly_overtime": monthly_overtime
+        })
+
+    @action(detail=False, methods=['get'])
+    def employee_monthly_chart(self, request):
+        """Données de graphique mensuel pour l'employé"""
+        user = request.user
+        today = timezone.now().date()
+        current_month = today.replace(day=1)
+
+        # Pointages du mois groupés par jour
+        from django.db.models import Count
+        daily_data = Pointage.objects.filter(
+            employe=user,
+            date__gte=current_month,
+            date__lte=today
+        ).values('date').annotate(
+            hours_worked=models.Count('id')
+        ).order_by('date')
+
+        labels = [str(d['date']) for d in daily_data]
+        data = [d['hours_worked'] for d in daily_data]
+
+        return Response({
+            "labels": labels,
+            "datasets": [{
+                "label": "Heures travaillées",
+                "data": data,
+                "borderColor": "#3b82f6",
+                "backgroundColor": "rgba(59, 130, 246, 0.1)",
+                "fill": True,
+                "tension": 0.4
+            }]
+        })
+
+    @action(detail=False, methods=['get'])
+    def manager(self, request):
+        """KPI pour manager/admin - vue globale de l'équipe"""
+        user = request.user
+
+        if user.role not in ["ADMIN", "MANAGER"]:
+            return Response({"error": "Accès refusé"}, status=403)
+
+        today = timezone.now().date()
+
+        # Pointages du jour
+        todays_pointages = Pointage.objects.filter(date=today)
+
+        # Présents aujourd'hui
+        present_today = todays_pointages.count()
+
+        # En retard aujourd'hui
+        late_today = todays_pointages.filter(est_retard=True).count()
+
+        # Heures sup aujourd'hui
+        total_overtime_minutes = todays_pointages.aggregate(
+            total=models.Sum('heures_sup')
+        )['total'] or 0
+        overtime_today = round(total_overtime_minutes / 60, 2)
+
+        # Total employés
+        total_employees = User.objects.filter(role="EMPLOYE").count()
+
+        return Response({
+            "present_today": present_today,
+            "late_today": late_today,
+            "overtime_today": overtime_today,
+            "total_employees": total_employees
+        })
+
+    @action(detail=False, methods=['get'])
+    def manager_team_chart(self, request):
+        """Graphique de répartition de l'équipe pour manager"""
+        user = request.user
+
+        if user.role not in ["ADMIN", "MANAGER"]:
+            return Response({"error": "Accès refusé"}, status=403)
+
+        today = timezone.now().date()
+
+        # Répartition: présents, retards, absents
+        total_employees = User.objects.filter(role="EMPLOYE").count()
+        present = Pointage.objects.filter(date=today).count()
+        late = Pointage.objects.filter(date=today, est_retard=True).count()
+        absent = total_employees - present
+
+        return Response({
+            "labels": ["Présents", "En retard", "Absents"],
+            "datasets": [{
+                "label": "Répartition équipe",
+                "data": [present, late, absent],
+                "backgroundColor": ["#10b981", "#f59e0b", "#ef4444"],
+                "borderWidth": 0
+            }]
+        })
+
+    @action(detail=False, methods=['get'])
+    def manager_weekly_trend(self, request):
+        """Tendance hebdomadaire des pointages pour manager"""
+        user = request.user
+
+        if user.role not in ["ADMIN", "MANAGER"]:
+            return Response({"error": "Accès refusé"}, status=403)
+
+        today = timezone.now().date()
+        week_ago = today - timedelta(days=7)
+
+        # Pointages des 7 derniers jours
+        from django.db.models import Count
+        daily_data = Pointage.objects.filter(
+            date__gte=week_ago,
+            date__lte=today
+        ).values('date').annotate(
+            count=Count('id')
+        ).order_by('date')
+
+        labels = [str(d['date']) for d in daily_data]
+        data = [d['count'] for d in daily_data]
+
+        return Response({
+            "labels": labels,
+            "datasets": [{
+                "label": "Pointages journaliers",
+                "data": data,
+                "borderColor": "#8b5cf6",
+                "backgroundColor": "rgba(139, 92, 246, 0.1)",
+                "fill": True,
+                "tension": 0.4
+            }]
+        })
+
+    @action(detail=False, methods=['get'])
+    def attendance_stats(self, request):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        today = timezone.now().date()
+        
+        # Récupérer tous les employés
+        total_employees = User.objects.filter(role='EMPLOYE').count()
+        
+        # Pointages du jour
+        today_pointages = Pointage.objects.filter(date=today)
+        
+        # Présents (ont pointé aujourd'hui)
+        presents = today_pointages.values('employe').distinct().count()
+        
+        # Retards (pointages avec retard aujourd'hui)
+        retards = today_pointages.filter(est_retard=True).count()
+        
+        # Absents (employés qui n'ont pas pointé aujourd'hui)
+        absents = total_employees - presents
+        
+        # Taux de ponctualité
+        taux_ponctualite = ((presents - retards) / total_employees * 100) if total_employees > 0 else 0
+        
+        return Response({
+            "total_employees": total_employees,
+            "presents": presents,
+            "retards": retards,
+            "absents": absents,
+            "taux_ponctualite": round(taux_ponctualite, 1)
+        })
 
 
 
