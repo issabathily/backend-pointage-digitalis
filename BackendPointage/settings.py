@@ -218,7 +218,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # ⚠️ option temporaire si besoin (debug CORS)
-# CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = True
 
 INSTALLED_APPS = [
     'django.contrib.admin',
