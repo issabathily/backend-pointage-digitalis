@@ -200,20 +200,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get("SECRET_KEY", "unsafe-secret-key")
 
 # ❌ désactiver en prod
-DEBUG = False
+DEBUG = True
 
-# 🌍 Autoriser Render
+# 🌍 Autoriser Render et localhost
 ALLOWED_HOSTS = [
     ".onrender.com",
+    "localhost",
+    "127.0.0.1",
 ]
 
 # ✅ CORS (autoriser ton frontend)
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "https://pointage-digitalis-sn.onrender.com",
 ]
 
 # ✅ CSRF (important pour POST/login)
 CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "https://pointage-digitalis-sn.onrender.com",
 ]
 
@@ -299,8 +305,8 @@ REST_FRAMEWORK = {
 
 # 🔑 JWT
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),  
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),

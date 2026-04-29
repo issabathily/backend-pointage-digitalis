@@ -103,14 +103,8 @@ def create_manager_qr_session(request):
     type_pointage = request.data.get("type", "ENTREE")
     today = date.today()
     
-    # Désactiver les anciennes sessions du même type pour aujourd'hui
-    ManagerQRSession.objects.filter(
-        manager=request.user,
-        date=today,
-        type_pointage=type_pointage
-    ).update(is_active=False)
-    
-    # Créer une nouvelle session
+    # Ne désactiver PAS les anciennes sessions - permettre entrée ET sortie simultanées
+    # Créer simplement une nouvelle session
     session = ManagerQRSession.objects.create(
         manager=request.user,
         type_pointage=type_pointage,
@@ -132,11 +126,12 @@ def get_active_manager_session(request):
     today = date.today()
     type_pointage = request.GET.get("type", "ENTREE")
     
+    # Récupérer la session la plus récente pour ce type
     session = ManagerQRSession.objects.filter(
         date=today,
         type_pointage=type_pointage,
         is_active=True
-    ).first()
+    ).order_by('-created_at').first()
     
     if not session:
         return Response({"error": "Aucune session active pour aujourd'hui"}, status=404)

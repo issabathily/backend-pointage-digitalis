@@ -17,16 +17,67 @@ class PointageViewSet(viewsets.ModelViewSet):
     serializer_class = PointageSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        if user.role in ["ADMIN", "MANAGER"]:
+            return Pointage.objects.all().select_related('employe')
+        return Pointage.objects.filter(employe=user)
 
-def working_days(start_date, end_date):
-    """Calcule les jours ouvrables entre deux dates (hors dimanches)."""
-    count = 0
-    current = start_date
-    while current <= end_date:
-        if current.weekday() != 6:
-            count += 1
-        current += timedelta(days=1)
-    return count
+    @action(detail=False, methods=['get'])
+    def today(self, request):
+        """Récupérer tous les pointages du jour pour le manager"""
+        if request.user.role not in ["ADMIN", "MANAGER"]:
+            return Response({"error": "Accès refusé"}, status=403)
+        
+        today = timezone.now().date()
+        pointages = Pointage.objects.filter(
+            date=today
+        ).select_related('employe').order_by('-heure_entree', '-heure_sortie')
+        
+        serializer = self.get_serializer(pointages, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def scan(self, request):
+        """Enregistrer un pointage via scan QR"""
+        user_id = request.data.get("user")
+        type_pointage = request.data.get("type")
+        date_str = request.data.get("date")
+        
+        try:
+            employe = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "Employé introuvable"}, status=404)
+        
+        from datetime import datetime
+        pointage_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else timezone.now().date()
+        
+        pointage, created = Pointage.objects.get_or_create(
+            employe=employe,
+            date=pointage_date
+        )
+        
+        current_time = timezone.now().time()
+        
+        if type_pointage == "ENTREE":
+            if pointage.heure_entree:
+                return Response({"error": "Entrée déjà enregistrée"}, status=400)
+            pointage.heure_entree = current_time
+            if current_time > timezone.now().replace(hour=9, minute=0, second=0, microsecond=0).time():
+                pointage.est_retard = True
+                pointage.minutes_retard = (current_time.hour * 60 + current_time.minute) - (9 * 60)
+        elif type_pointage == "SORTIE":
+            # Si l'entrée n'existe pas, la créer automatiquement (cas où l'entrée a été faite manuellement)
+            if not pointage.heure_entree:
+                pointage.heure_entree = current_time  # Utiliser l'heure actuelle comme entrée par défaut
+            if pointage.heure_sortie:
+                return Response({"error": "Sortie déjà enregistrée"}, status=400)
+            pointage.heure_sortie = current_time
+            if current_time > timezone.now().replace(hour=17, minute=0, second=0, microsecond=0).time():
+                pointage.heures_sup = (current_time.hour * 60 + current_time.minute) - (17 * 60)
+        
+        pointage.save()
+        return Response({"message": "Pointage enregistré avec succès", "pointage": PointageSerializer(pointage).data})
 
 
 class AbsenceViewSet(viewsets.ModelViewSet):
@@ -52,17 +103,7 @@ class AbsenceViewSet(viewsets.ModelViewSet):
         if absence.statut != 'EN_ATTENTE':
             return Response({'error': 'Cette absence a déjà été traitée.'}, status=400)
 
-        # Vérifier le solde si c'est un congé
-        if absence.typeAbsence == 'CONGE':
-            days = working_days(absence.dateDebut, absence.dateFin)
-            user = absence.user
-            if user.conge_restant < days:
-                return Response({
-                    'error': f'Solde insuffisant. {days} jours demandés, {user.conge_restant} restants.'
-                }, status=400)
-            user.conge_restant -= days
-            user.save()
-
+        # Plus de vérification du solde de congé - les employés peuvent faire des demandes à tout moment
         absence.statut = 'VALIDEE'
         absence.save()
         return Response({'message': 'Absence validée'})
