@@ -5,6 +5,9 @@ from django.contrib.auth import get_user_model, authenticate
 from .serializers import UserSerializer
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, BasePermission, SAFE_METHODS
 from rest_framework_simplejwt.tokens import RefreshToken
+from .models import User, ManagerQRSession
+from django.utils import timezone
+from datetime import date
 
 User = get_user_model()
 
@@ -88,3 +91,59 @@ def generate_dynamic_qr_view(request):
 
     except User.DoesNotExist:
         return Response({"error": "Employé introuvable"}, status=404)
+
+
+# Créer une session QR (pour le manager)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_manager_qr_session(request):
+    if request.user.role not in ["ADMIN", "MANAGER"]:
+        return Response({"error": "Accès refusé"}, status=403)
+    
+    type_pointage = request.data.get("type", "ENTREE")
+    today = date.today()
+    
+    # Désactiver les anciennes sessions du même type pour aujourd'hui
+    ManagerQRSession.objects.filter(
+        manager=request.user,
+        date=today,
+        type_pointage=type_pointage
+    ).update(is_active=False)
+    
+    # Créer une nouvelle session
+    session = ManagerQRSession.objects.create(
+        manager=request.user,
+        type_pointage=type_pointage,
+        date=today
+    )
+    
+    return Response({
+        "session_id": str(session.session_id),
+        "type": session.type_pointage,
+        "date": str(session.date),
+        "generated_at": session.created_at.isoformat()
+    })
+
+
+# Récupérer la session QR active du jour (pour les employés)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_active_manager_session(request):
+    today = date.today()
+    type_pointage = request.GET.get("type", "ENTREE")
+    
+    session = ManagerQRSession.objects.filter(
+        date=today,
+        type_pointage=type_pointage,
+        is_active=True
+    ).first()
+    
+    if not session:
+        return Response({"error": "Aucune session active pour aujourd'hui"}, status=404)
+    
+    return Response({
+        "session_id": str(session.session_id),
+        "type": session.type_pointage,
+        "date": str(session.date),
+        "manager_email": session.manager.email
+    })

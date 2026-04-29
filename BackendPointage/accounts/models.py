@@ -91,3 +91,19 @@ class QRDynamic(models.Model):
 
     def __str__(self):
         return f"{self.employe.nom} {self.employe.prenom} - {self.type_pointage}"
+
+class ManagerQRSession(models.Model):
+    TYPE_CHOICES = (
+        ("ENTREE", "Entrée"),
+        ("SORTIE", "Sortie"),
+    )
+
+    session_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    manager = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    type_pointage = models.CharField(max_length=10, choices=TYPE_CHOICES)
+    date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.manager.email} - {self.type_pointage} - {self.date}"
